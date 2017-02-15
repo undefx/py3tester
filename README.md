@@ -25,7 +25,7 @@ The return value of `run_tests` is a `dict` containing three things:
     - 'is_string': a boolean indicating whether the statement was a string
 
 # example
-Testing can also be done from the command line. For example, suppose that there is a module [thing.py](samples/thing.py) and that unit tests for that module are in [test_thing.py](samples/test_thing.py). Tests can be run with `python3 py3tester.py test_thing.py` (with optional an flag '--color' for colored output).
+Testing can also be done from the command line. For example, suppose that there is a module [thing.py](samples/thing.py) and that unit tests for that module are in [test_thing.py](samples/test_thing.py). Tests can be run with `python3 py3tester.py test_thing.py` (with an optional flag '--color' for colored output).
 
 The output is:
 ````text
