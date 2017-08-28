@@ -4,6 +4,9 @@
 import argparse
 import ast
 import importlib
+import inspect
+import json
+import math
 import os.path
 import re
 import sys
@@ -198,25 +201,27 @@ class TestResult(unittest.TextTestResult):
     self.__set_result(test, False, False, fail, err)
 
 
-def run_tests(filename):
+def run_tests(filename, output=sys.stdout):
   """Run all tests in the given file and return unit and coverage resuls."""
 
   # get the module name from the filename
-  match = re.match('^(.*)\\.py$', os.path.basename(filename))
-  if match is None:
+  path, ext = filename[:-3], filename[-3:]
+  if ext != '.py':
     raise Exception('not a *.py file: ' + str(filename))
-  module_name = match.group(1)
+  module_name = path.replace(os.path.sep, '.')
+
+  # needed when the file is in a subdirectory
+  sys.path.append(os.getcwd())
 
   # import the module and determine the test target
   module = importlib.import_module(module_name)
-  target = getattr(module, '__test_target__', None)
-  if target is None:
+  target_module = getattr(module, '__test_target__', None)
+  if target_module is None:
     raise Exception('%s missing attribute __test_target__' % module_name)
-  if target[-3:] != '.py':
-    raise Exception('test target %s not a *.py file' % target)
+  target_file = target_module.replace('.', os.path.sep) + '.py'
 
   # trace execution while loading the target file
-  tracer = CodeTracer.from_source_file(target)
+  tracer = CodeTracer.from_source_file(target_file)
   global_vars = tracer.run()
 
   # make the target's globals available to the test module
@@ -227,7 +232,7 @@ def run_tests(filename):
   # load and run unit tests
   tests = unittest.defaultTestLoader.loadTestsFromModule(module)
   runner = unittest.TextTestRunner(
-    stream=sys.stdout,
+    stream=output,
     verbosity=2,
     resultclass=TestResult
   )
@@ -238,8 +243,159 @@ def run_tests(filename):
   return {
     'unit': unit_info.results,
     'coverage': coverage_results,
-    'target': target,
+    'target_module': target_module,
+    'target_file': target_file,
   }
+
+
+def show_results(args, results):
+  # colored output
+  green, gray, red = 32, 37, 31
+  def colorize(txt, color):
+    return '\x1b[0;%d;40m%s\x1b[0m' % (color, txt)
+
+  # unit results
+  if args.json:
+    export = {
+      'target_file': results['target_file'],
+      'target_module': results['target_module'],
+      'unit': {
+        'tests': {},
+        'summary': {},
+      },
+      'coverage': {
+        'lines': [],
+        'hit_counts': {},
+        'summary': {},
+      },
+    }
+  else:
+    print('=' * 70)
+    print('Test results for:')
+    print(' %s (%s)' % (results['target_module'], results['target_file']))
+    print('Unit:')
+  test_bins = {-2: 0, -1: 0, 0: 0, 1: 0}
+  for name in sorted(results['unit'].keys()):
+    result = results['unit'][name]
+    test_bins[result] += 1
+    txt, color = {
+      -2: ('error', red),
+      -1: ('fail', red),
+      0: ('skip', gray),
+      1: ('pass', green),
+    }[result]
+    if args.json:
+      export['unit']['tests'][name] = txt
+    else:
+      if args.color:
+        print(' %s: %s' % (name, colorize(txt, color)))
+      else:
+        print(' %s: %s' % (name, txt))
+  if args.json:
+    export['unit']['summary'] = {
+      'total': len(results['unit']),
+      'error': test_bins[-2],
+      'fail': test_bins[-1],
+      'skip': test_bins[0],
+      'pass': test_bins[1],
+    }
+  else:
+    def fmt(num, goodness):
+      if args.color:
+        if goodness > 0 and num > 0:
+          color = green
+        elif goodness < 0 and num > 0:
+          color = red
+        else:
+          color = gray
+        return colorize(str(num), color)
+      else:
+        return str(num)
+    print(' error: %s' % fmt(test_bins[-2], -1))
+    print('  fail: %s' % fmt(test_bins[-1], -1))
+    print('  skip: %s' % fmt(test_bins[0], 0))
+    print('  pass: %s' % fmt(test_bins[1], 1))
+
+  # coverage results
+  if not args.json:
+    print('Coverage:')
+
+  def print_line(line, txt, hits, required):
+    if not args.full:
+      return
+    if args.json:
+      export['coverage']['lines'].append({
+        'line': line,
+        'hits': hits,
+        'required': required,
+      })
+      return
+    txt, cov = '%-80s' % txt, ''
+    if required:
+      cov = '%dx' % hits
+    if args.color:
+      if not required:
+        color = gray
+      elif hits > 0:
+        color = green
+      else:
+        color = red
+      txt = colorize(txt, color)
+    print(' %4d %s %s' % (line, txt, cov))
+
+  with open(results['target_file']) as f:
+    src = [(i, line) for (i, line) in enumerate(f.readlines())]
+
+  hit_bins = {0: 0}
+  for row in results['coverage']:
+    while len(src) > 0 and src[0][0] < row['line'] - 1:
+      line, hits = src[0][0] + 1, 0
+      txt, src = src[0][1][:-1], src[1:]
+      print_line(line, txt, hits, False)
+    line, hits = row['line'], row['executions']
+    txt, src = src[0][1][:-1], src[1:]
+    required = not row['is_string']
+    print_line(line, txt, hits, required)
+    if required:
+      if hits not in hit_bins:
+        hit_bins[hits] = 1
+      else:
+        hit_bins[hits] += 1
+  while len(src) > 0:
+    line, hits = src[0][0] + 1, 0
+    txt, src = src[0][1][:-1], src[1:]
+    print_line(line, txt, hits, False)
+
+  for hits in sorted(hit_bins.keys()):
+    num = hit_bins[hits]
+    num_str = str(num)
+    if args.color:
+      if hits == 0 and num > 0:
+        color = red
+      elif hits > 0 and num > 0:
+        color = green
+      else:
+        color = gray
+      num_str = colorize(num_str, color)
+    if args.json:
+      export['coverage']['hit_counts'][hits] = num
+    else:
+      print(' %dx: %s' % (hits, num_str))
+  total_lines = sum(hit_bins.values())
+  lines_hit = total_lines - hit_bins[0]
+  if args.json:
+    export['coverage']['summary'] = {
+      'total_lines': total_lines,
+      'hit_lines': lines_hit,
+      'missed_lines': (total_lines - lines_hit),
+      'percent': lines_hit / max(total_lines, 1),
+    }
+  else:
+    print(' overall: %d%%' % math.floor(100 * lines_hit / total_lines))
+
+  # export json
+  if args.json:
+    print(json.dumps(export))
 
 
 def main():
@@ -254,66 +410,36 @@ def main():
   )
   parser.add_argument(
     '--color',
+    '-c',
     default=False,
     action='store_true',
     help='colorize results'
   )
+  parser.add_argument(
+    '--full',
+    '--f',
+    default=False,
+    action='store_true',
+    help='show coverage for each line'
+  )
+  parser.add_argument(
+    '--json',
+    '--j',
+    default=False,
+    action='store_true',
+    help='print results in JSON format'
+  )
   args = parser.parse_args()
 
   # run unit and coverage tests
-  results = run_tests(args.testfile)
-
-  # colored output
-  green, grey, red = 32, 37, 31
-  def colorize(txt, color):
-    return '\x1b[0;%d;40m%s\x1b[0m' % (color, txt)
-
-  # unit results
-  print('=' * 70)
-  print('Test results for: %s' % results['target'])
-  print('Unit:')
-  for name in sorted(results['unit'].keys()):
-    result = results['unit'][name]
-    txt, color = {
-      -2: ('error', red),
-      -1: ('fail', red),
-      0: ('skip', grey),
-      1: ('pass', green),
-    }[result]
-    if args.color:
-      print(' %s: %s' % (name, colorize(txt, color)))
-    else:
-      print(' %s: %s' % (name, txt))
-
-  # coverage results
-  def print_line(line, txt, hits, required):
-    txt, cov = '%-80s' % txt, ''
-    if required:
-      cov = '%dx' % hits
-    if args.color:
-      if not required:
-        color = grey
-      elif hits > 0:
-        color = green
-      else:
-        color = red
-      txt = colorize(txt, color)
-    print(' %4d %s %s' % (line, txt, cov))
-  print('Coverage:')
-  with open(results['target']) as f:
-    src = [(i, line) for (i, line) in enumerate(f.readlines())]
-  for row in results['coverage']:
-    while len(src) > 0 and src[0][0] < row['line'] - 1:
-      line, hits = src[0][0] + 1, 0
-      txt, src = '%-80s' % src[0][1][:-1], src[1:]
-      print_line(line, txt, hits, False)
-    line, hits = row['line'], row['executions']
-    txt, src = '%-80s' % src[0][1][:-1], src[1:]
-    print_line(line, txt, hits, not row['is_string'])
-  while len(src) > 0:
-    line, hits = src[0][0] + 1, 0
-    txt, src = '%-80s' % src[0][1][:-1], src[1:]
-    print_line(line, txt, hits, False)
+  if args.json:
+    # suppress other output
+    with open(os.devnull, 'w') as output:
+      results = run_tests(args.testfile, output)
+  else:
+    # use default output
+    results = run_tests(args.testfile)
+  show_results(args, results)
 
 
 if __name__ == '__main__':
