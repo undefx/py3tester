@@ -3,6 +3,7 @@
 # standard library
 import argparse
 import ast
+import glob
 import importlib
 import inspect
 import json
@@ -248,6 +249,18 @@ def run_tests(filename, output=sys.stdout):
   }
 
 
+def find_tests(location, regex, recursive):
+  """Find files containing unit tests."""
+  if os.path.isdir(location):
+    pattern = re.compile(regex)
+    all_files = glob.glob(os.path.join(location, '**'), recursive=recursive)
+    ismatch = lambda f: pattern.match(os.path.basename(f)) is not None
+    tests_files = list(filter(ismatch, filter(os.path.isfile, all_files)))
+  else:
+    tests_files = [location]
+  return sorted(tests_files)
+
+
 def show_results(args, results):
   # colored output
   green, gray, red = 32, 37, 31
@@ -404,9 +417,23 @@ def main():
   # args and usage
   parser = argparse.ArgumentParser()
   parser.add_argument(
-    'testfile',
+    'location',
     type=str,
-    help='file containing unit tests'
+    help='file or directory containing unit tests'
+  )
+  parser.add_argument(
+    '--pattern',
+    '-p',
+    default='^.*(test_.*|.*_test)\\.py$',
+    type=str,
+    help='regex for finding test files'
+  )
+  parser.add_argument(
+    '--recursive',
+    '-r',
+    default=False,
+    action='store_true',
+    help='search for tests recursively'
   )
   parser.add_argument(
     '--color',
@@ -432,14 +459,25 @@ def main():
   args = parser.parse_args()
 
   # run unit and coverage tests
+  test_files = find_tests(args.location, args.pattern, args.recursive)
   if args.json:
     # suppress other output
     with open(os.devnull, 'w') as output:
-      results = run_tests(args.testfile, output)
+      for filename in test_files:
+        results = run_tests(filename, output)
+        show_results(args, results)
   else:
     # use default output
-    results = run_tests(args.testfile)
-  show_results(args, results)
+    all_pass = True
+    for filename in test_files:
+      results = run_tests(filename)
+      show_results(args, results)
+      if len(results['unit']) > 0:
+        all_pass = all_pass and min(results['unit'].values()) == 1
+    if all_pass:
+      print('All tests passed!')
+    else:
+      print('Some tests did not pass.')
 
 
 if __name__ == '__main__':
