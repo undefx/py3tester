@@ -166,7 +166,7 @@ class TestResult(unittest.TextTestResult):
       self.results[name] = TestResult.FAIL
     else:
       # don't overwrite an earlier result (e.g. of a failed subtest)
-      if self.results.get(test, None) is None:
+      if self.results.get(name, None) is None:
         self.results[name] = TestResult.PASS
 
   def addError(self, test, err):
@@ -198,8 +198,8 @@ class TestResult(unittest.TextTestResult):
     super().addSubTest(test, subtest, outcome)
     # a failed or errored subtest fails or errors the whole test
     fail = outcome is not None
-    err = outcome[-1] if fail else None
-    self.__set_result(test, False, False, fail, err)
+    tb = outcome[-1] if fail else None
+    self.__set_result(test, False, False, fail, tb)
 
 
 def run_tests(filename, output=sys.stdout):
