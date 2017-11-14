@@ -1,9 +1,11 @@
 # py3tester
+
 Simultaneous unit and coverage testing for python 3 modules.
 
 Unit testing is provided by the python's built-in [unittest](https://docs.python.org/3/library/unittest.html) package. Line-based coverage is measured by first injecting tracing calls into the AST of the target module and then recording which statements were executed by unit tests.
 
 # api
+
 Testing can be done programmatically by calling `run_tests`. For example:
 
 ````python
@@ -13,10 +15,10 @@ results = run_tests('somefile.py')
 
 In the above example, somefile.py contains:
   - unit tests for some module
-  - a global variable named `__test_target__` that contains the filename of the test target
+  - a global variable named `__test_target__` that contains the module name of the test target
 
 The return value of `run_tests` is a `dict` containing three things:
-  - 'target': the name of the tested file (the value of `__test_target__`)
+  - 'target': the name of the tested module (the value of `__test_target__`)
   - 'unit': unit test results, as a `dict` of test name to test result (pass, skip, fail, or error)
   - 'coverage': coverage results, as a `list` of `dicts` containing:
     - 'executions': the number of times the statement was executed
@@ -25,6 +27,7 @@ The return value of `run_tests` is a `dict` containing three things:
     - 'is_string': a boolean indicating whether the statement was a string
 
 # example
+
 Testing can also be done from the command line. For example, suppose that there is a module [thing.py](samples/thing.py) and that unit tests for that module are in [test_thing.py](samples/test_thing.py). Tests can be run with `python3 py3tester.py test_thing.py` (with an optional flag '--color' for colored output).
 
 The output is:
@@ -74,4 +77,11 @@ Coverage:
  31   def get_tau(guess=6):
  32     """Make a guess at τ."""
  33     return 2 * Thing.get_pi(Thing.div(guess, 2)) 0x
+````
+
+To run this example and see the full output, including unit test results, run:
+````shell
+git clone https://github.com/undefx/py3tester.git
+cd py3tester
+python3 -m src.py3tester --color --full samples
 ````

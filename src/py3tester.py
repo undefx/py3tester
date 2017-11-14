@@ -3,12 +3,11 @@
 # standard library
 import argparse
 import ast
-import glob
 import importlib
 import inspect
 import json
 import math
-import os.path
+import os
 import re
 import sys
 import unittest
@@ -202,6 +201,29 @@ class TestResult(unittest.TextTestResult):
     self.__set_result(test, False, False, fail, tb)
 
 
+class Styler:
+  """Helper class for producing stylized terminal output."""
+
+  green, gray, red = 32, 37, 31
+
+  def __init__(self, json_only=False, use_colors=False, show_source=False):
+    self.__json_only = json_only
+    self.__use_colors = use_colors
+    self.__show_source = show_source
+
+  def colorize(self, txt, color):
+    """Color the given string."""
+    if self.__use_colors:
+      return '\x1b[0;%d;40m%s\x1b[0m' % (color, txt)
+    else:
+      return txt
+
+  def emit(self, txt, is_source=False):
+    """Print the given string, conditional on export settings."""
+    if not self.__json_only and (not is_source or self.__show_source):
+      print(txt)
+
+
 def run_tests(filename, output=sys.stdout):
   """Run all tests in the given file and return unit and coverage resuls."""
 
@@ -253,108 +275,106 @@ def find_tests(location, regex, recursive):
   """Find files containing unit tests."""
   if os.path.isdir(location):
     pattern = re.compile(regex)
-    all_files = glob.glob(os.path.join(location, '**'), recursive=recursive)
+    file_set = set()
+    for dir_, dirs, files in os.walk(location):
+      for f in files:
+        file_set.add(os.path.join(dir_, f))
+      if not recursive:
+        break
+    all_files = sorted(file_set)
     ismatch = lambda f: pattern.match(os.path.basename(f)) is not None
     tests_files = list(filter(ismatch, filter(os.path.isfile, all_files)))
   else:
     tests_files = [location]
-  return sorted(tests_files)
+  return tests_files
 
 
-def show_results(args, results):
-  # colored output
-  green, gray, red = 32, 37, 31
-  def colorize(txt, color):
-    return '\x1b[0;%d;40m%s\x1b[0m' % (color, txt)
+def analyze_results(results, styler=None):
+  """
+  Extract a useful set of information from the results of a single unit test.
+  """
+
+  if styler is None:
+    styler = Styler(json_only=True)
 
   # unit results
-  if args.json:
-    export = {
-      'target_file': results['target_file'],
-      'target_module': results['target_module'],
-      'unit': {
-        'tests': {},
-        'summary': {},
-      },
-      'coverage': {
-        'lines': [],
-        'hit_counts': {},
-        'summary': {},
-      },
-    }
-  else:
-    print('=' * 70)
-    print('Test results for:')
-    print(' %s (%s)' % (results['target_module'], results['target_file']))
-    print('Unit:')
+  export = {
+    'target_file': results['target_file'],
+    'target_module': results['target_module'],
+    'unit': {
+      'tests': {},
+      'summary': {},
+    },
+    'coverage': {
+      'lines': [],
+      'hit_counts': {},
+      'summary': {},
+    },
+  }
+  styler.emit('=' * 70)
+  styler.emit('Test results for:')
+  styler.emit(' %s (%s)' % (results['target_module'], results['target_file']))
+  styler.emit('Unit:')
+
   test_bins = {-2: 0, -1: 0, 0: 0, 1: 0}
   for name in sorted(results['unit'].keys()):
     result = results['unit'][name]
     test_bins[result] += 1
     txt, color = {
-      -2: ('error', red),
-      -1: ('fail', red),
-      0: ('skip', gray),
-      1: ('pass', green),
+      -2: ('error', Styler.red),
+      -1: ('fail', Styler.red),
+      0: ('skip', Styler.gray),
+      1: ('pass', Styler.green),
     }[result]
-    if args.json:
-      export['unit']['tests'][name] = txt
+    export['unit']['tests'][name] = txt
+    styler.emit(' %s: %s' % (name, styler.colorize(txt, color)))
+
+  export['unit']['summary'] = {
+    'total': len(results['unit']),
+    'error': test_bins[-2],
+    'fail': test_bins[-1],
+    'skip': test_bins[0],
+    'pass': test_bins[1],
+  }
+
+  def fmt(num, goodness):
+    if goodness > 0 and num > 0:
+      color = Styler.green
+    elif goodness < 0 and num > 0:
+      color = Styler.red
     else:
-      if args.color:
-        print(' %s: %s' % (name, colorize(txt, color)))
-      else:
-        print(' %s: %s' % (name, txt))
-  if args.json:
-    export['unit']['summary'] = {
-      'total': len(results['unit']),
-      'error': test_bins[-2],
-      'fail': test_bins[-1],
-      'skip': test_bins[0],
-      'pass': test_bins[1],
-    }
-  else:
-    def fmt(num, goodness):
-      if args.color:
-        if goodness > 0 and num > 0:
-          color = green
-        elif goodness < 0 and num > 0:
-          color = red
-        else:
-          color = gray
-        return colorize(str(num), color)
-      else:
-        return str(num)
-    print(' error: %s' % fmt(test_bins[-2], -1))
-    print('  fail: %s' % fmt(test_bins[-1], -1))
-    print('  skip: %s' % fmt(test_bins[0], 0))
-    print('  pass: %s' % fmt(test_bins[1], 1))
+      color = Styler.gray
+    return styler.colorize(str(num), color)
+
+  styler.emit(' error: %s' % fmt(test_bins[-2], -1))
+  styler.emit('  fail: %s' % fmt(test_bins[-1], -1))
+  styler.emit('  skip: %s' % fmt(test_bins[0], 0))
+  styler.emit('  pass: %s' % fmt(test_bins[1], 1))
 
   # coverage results
-  if not args.json:
-    print('Coverage:')
+  styler.emit('Coverage:')
 
   def print_line(line, txt, hits, required):
-    if not args.full:
-      return
-    if args.json:
-      export['coverage']['lines'].append({
-        'line': line,
-        'hits': hits,
-        'required': required,
-      })
-      return
-    txt, cov = '%-80s' % txt, ''
+    export['coverage']['lines'].append({
+      'line': line,
+      'hits': hits,
+      'required': required,
+    })
+
     if required:
       cov = '%dx' % hits
-    if args.color:
-      if not required:
-        color = gray
-      elif hits > 0:
-        color = green
-      else:
-        color = red
-      txt = colorize(txt, color)
-    print(' %4d %s %s' % (line, txt, cov))
+    else:
+      cov = ''
+
+    if not required:
+      color = Styler.gray
+    elif hits > 0:
+      color = Styler.green
+    else:
+      color = Styler.red
+    txt = styler.colorize('%-80s' % txt, color)
+
+    styler.emit(' %4d %s %s' % (line, txt, cov), is_source=True)
 
   with open(results['target_file']) as f:
     src = [(i, line) for (i, line) in enumerate(f.readlines())]
@@ -381,34 +401,29 @@ def show_results(args, results):
 
   for hits in sorted(hit_bins.keys()):
     num = hit_bins[hits]
-    num_str = str(num)
-    if args.color:
-      if hits == 0 and num > 0:
-        color = red
-      elif hits > 0 and num > 0:
-        color = green
-      else:
-        color = gray
-      num_str = colorize(num_str, color)
-    if args.json:
-      export['coverage']['hit_counts'][hits] = num
+    if hits == 0 and num > 0:
+      color = Styler.red
+    elif hits > 0 and num > 0:
+      color = Styler.green
     else:
-      print(' %dx: %s' % (hits, num_str))
+      color = Styler.gray
+    num_str = styler.colorize(str(num), color)
+
+    export['coverage']['hit_counts'][hits] = num
+    styler.emit(' %dx: %s' % (hits, num_str))
   total_lines = sum(hit_bins.values())
   lines_hit = total_lines - hit_bins[0]
-  if args.json:
-    export['coverage']['summary'] = {
-      'total_lines': total_lines,
-      'hit_lines': lines_hit,
-      'missed_lines': (total_lines - lines_hit),
-      'percent': lines_hit / max(total_lines, 1),
-    }
-  else:
-    print(' overall: %d%%' % math.floor(100 * lines_hit / total_lines))
 
-  # export json
-  if args.json:
-    print(json.dumps(export))
+  export['coverage']['summary'] = {
+    'total_lines': total_lines,
+    'hit_lines': lines_hit,
+    'missed_lines': (total_lines - lines_hit),
+    'percent': lines_hit / max(total_lines, 1),
+  }
+  styler.emit(' overall: %d%%' % math.floor(100 * lines_hit / total_lines))
+
+  # return results
+  return export
 
 
 def main():
@@ -459,25 +474,40 @@ def main():
   args = parser.parse_args()
 
   # run unit and coverage tests
+  styler = Styler(
+    json_only=args.json,
+    use_colors=args.color,
+    show_source=args.full
+  )
   test_files = find_tests(args.location, args.pattern, args.recursive)
   if args.json:
     # suppress other output
+    all_results = []
     with open(os.devnull, 'w') as output:
       for filename in test_files:
-        results = run_tests(filename, output)
-        show_results(args, results)
+        test_results = run_tests(filename, output)
+        all_results.append(analyze_results(test_results, styler))
+    print(json.dumps(all_results))
   else:
     # use default output
     all_pass = True
     for filename in test_files:
-      results = run_tests(filename)
-      show_results(args, results)
-      if len(results['unit']) > 0:
-        all_pass = all_pass and min(results['unit'].values()) == 1
-    if all_pass:
-      print('All tests passed!')
+      test_results = run_tests(filename)
+      analyze_results(test_results, styler)
+      if len(test_results['unit']) > 0:
+        all_pass = all_pass and min(test_results['unit'].values()) == 1
+    if args.color:
+      if all_pass:
+        icon = '✔ '
+      else:
+        icon = '✘ '
     else:
-      print('Some tests did not pass.')
+      icon = ''
+    if all_pass:
+      txt = styler.colorize('%sAll tests passed!' % icon, Styler.green)
+    else:
+      txt = styler.colorize('%sSome tests did not pass.' % icon, Styler.red)
+    styler.emit(txt)
 
 
 if __name__ == '__main__':

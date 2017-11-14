@@ -3,7 +3,7 @@
 # standard library
 import unittest
 # special import for tracking coverage
-__test_target__ = 'thing.py'
+__test_target__ = 'samples.thing'
 
 
 class BasicTests(unittest.TestCase):
