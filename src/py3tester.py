@@ -273,19 +273,20 @@ def run_tests(filename, output=sys.stdout):
 
 def find_tests(location, regex, recursive):
   """Find files containing unit tests."""
-  if os.path.isdir(location):
+  if not os.path.exists(location):
+    return []
+  elif os.path.isdir(location):
     pattern = re.compile(regex)
     file_set = set()
     for dir_, dirs, files in os.walk(location):
       for f in files:
-        file_set.add(os.path.join(dir_, f))
+        if pattern.match(f):
+          file_set.add(os.path.join(dir_, f))
       if not recursive:
         break
-    all_files = sorted(file_set)
-    ismatch = lambda f: pattern.match(os.path.basename(f)) is not None
-    tests_files = list(filter(ismatch, filter(os.path.isfile, all_files)))
+    return sorted(file_set)
   else:
-    tests_files = [location]
+    return [location]
   return tests_files
 
 
@@ -439,9 +440,9 @@ def main():
   parser.add_argument(
     '--pattern',
     '-p',
-    default='^.*(test_.*|.*_test)\\.py$',
+    default='^(test_.*|.*_test)\\.py$',
     type=str,
-    help='regex for finding test files'
+    help='filename regex for test discovery'
   )
   parser.add_argument(
     '--recursive',
