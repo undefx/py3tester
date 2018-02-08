@@ -271,7 +271,7 @@ def run_tests(filename, output=sys.stdout):
   }
 
 
-def find_tests(location, regex, recursive):
+def find_tests(location, regex, terminal):
   """Find files containing unit tests."""
   if not os.path.exists(location):
     return []
@@ -282,7 +282,7 @@ def find_tests(location, regex, recursive):
       for f in files:
         if pattern.match(f):
           file_set.add(os.path.join(dir_, f))
-      if not recursive:
+      if terminal:
         break
     return sorted(file_set)
   else:
@@ -427,10 +427,82 @@ def analyze_results(results, styler=None):
   return export
 
 
-def main():
-  """Run tests and print results to stdout."""
+def run_test_sets(location, pattern, terminal, json, color, full):
+  """
+  Run all test sets and print results to standard output.
 
-  # args and usage
+  location (str):
+    the path in which to search for unit tests
+  pattern (str):
+    regular expression for matching unit test filenames
+  terminal (bool):
+    whether the search should end with the given location (non-recursive)
+  json (bool):
+    whether to show JSON or human-readable output
+  color (bool):
+    whether human-readable output should be colorized
+  full (bool):
+    whether human-readable test target source code should be shown
+  """
+
+  # run unit and coverage tests
+  styler = Styler(
+    json_only=json,
+    use_colors=color,
+    show_source=full
+  )
+  test_files = find_tests(location, pattern, terminal)
+
+  if not test_files:
+    raise Exception('no tests found')
+
+  if json:
+    # suppress other output
+    all_results = []
+    with open(os.devnull, 'w') as output:
+      for filename in test_files:
+        test_results = run_tests(filename, output)
+        all_results.append(analyze_results(test_results, styler))
+    print(json.dumps(all_results))
+  else:
+    # use default output
+    all_pass = True
+    total_lines = hit_lines = 0
+    for filename in test_files:
+      x = run_tests(filename)
+      y = analyze_results(run_tests(filename), styler)
+      test_results = analyze_results(run_tests(filename), styler)
+      if len(test_results['unit']) > 0:
+        unit_stats = test_results['unit']['summary']
+        coverage_stats = test_results['coverage']['summary']
+        all_pass = all_pass and unit_stats['pass'] == unit_stats['total']
+        total_lines += coverage_stats['total_lines']
+        hit_lines += coverage_stats['hit_lines']
+    if total_lines == 0:
+      coverage = 0
+    else:
+      coverage = hit_lines / total_lines
+    percent = math.floor(coverage * 100)
+    coverage_str = '%d%% (%d/%d) coverage.' % (percent, hit_lines, total_lines)
+    if color:
+      if all_pass:
+        icon = '✔ '
+      else:
+        icon = '✘ '
+    else:
+      icon = ''
+    if all_pass:
+      result = '%sAll tests passed! %s' % (icon, coverage_str)
+      txt = styler.colorize(result, Styler.green)
+    else:
+      result = '%sSome tests did not pass. %s' % (icon, coverage_str)
+      txt = styler.colorize(result, Styler.red)
+    styler.emit(txt)
+
+
+def get_argument_parser():
+  """Set up command line arguments and usage."""
+
   parser = argparse.ArgumentParser()
   parser.add_argument(
     'location',
@@ -445,11 +517,18 @@ def main():
     help='filename regex for test discovery'
   )
   parser.add_argument(
-    '--recursive',
-    '-r',
+    '--terminal',
+    '-t',
     default=False,
     action='store_true',
-    help='search for tests recursively'
+    help='do not search for tests recursively'
+  )
+  parser.add_argument(
+    '--json',
+    '--j',
+    default=False,
+    action='store_true',
+    help='print results in JSON format'
   )
   parser.add_argument(
     '--color',
@@ -465,50 +544,21 @@ def main():
     action='store_true',
     help='show coverage for each line'
   )
-  parser.add_argument(
-    '--json',
-    '--j',
-    default=False,
-    action='store_true',
-    help='print results in JSON format'
-  )
-  args = parser.parse_args()
+  return parser
 
-  # run unit and coverage tests
-  styler = Styler(
-    json_only=args.json,
-    use_colors=args.color,
-    show_source=args.full
+
+def main():
+  """Run this script from the command line."""
+
+  args = get_argument_parser().parse_args()
+  run_test_sets(
+    args.location,
+    args.pattern,
+    args.terminal,
+    args.json,
+    args.color,
+    args.full
   )
-  test_files = find_tests(args.location, args.pattern, args.recursive)
-  if args.json:
-    # suppress other output
-    all_results = []
-    with open(os.devnull, 'w') as output:
-      for filename in test_files:
-        test_results = run_tests(filename, output)
-        all_results.append(analyze_results(test_results, styler))
-    print(json.dumps(all_results))
-  else:
-    # use default output
-    all_pass = True
-    for filename in test_files:
-      test_results = run_tests(filename)
-      analyze_results(test_results, styler)
-      if len(test_results['unit']) > 0:
-        all_pass = all_pass and min(test_results['unit'].values()) == 1
-    if args.color:
-      if all_pass:
-        icon = '✔ '
-      else:
-        icon = '✘ '
-    else:
-      icon = ''
-    if all_pass:
-      txt = styler.colorize('%sAll tests passed!' % icon, Styler.green)
-    else:
-      txt = styler.colorize('%sSome tests did not pass.' % icon, Styler.red)
-    styler.emit(txt)
 
 
 if __name__ == '__main__':
