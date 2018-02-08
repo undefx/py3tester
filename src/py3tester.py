@@ -469,8 +469,6 @@ def run_test_sets(location, pattern, terminal, json, color, full):
     all_pass = True
     total_lines = hit_lines = 0
     for filename in test_files:
-      x = run_tests(filename)
-      y = analyze_results(run_tests(filename), styler)
       test_results = analyze_results(run_tests(filename), styler)
       if len(test_results['unit']) > 0:
         unit_stats = test_results['unit']['summary']
