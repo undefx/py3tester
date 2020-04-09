@@ -1,4 +1,4 @@
-"""Simultaneous unit and coverage testing for python 3 modules."""
+"""Simultaneous unit, coverage, and timing testing for python 3 modules."""
 
 # standard library
 import argparse
@@ -10,6 +10,7 @@ import math
 import os
 import re
 import sys
+import time
 import unittest
 
 
@@ -74,6 +75,7 @@ class CodeTracer(ast.NodeTransformer):
       # coverage result for the current node
       coverage.append({
         'executions': node_info['counter'],
+        'time': node_info['time'],
         'line': node.lineno,
         'column': node.col_offset,
         'is_string': is_string(node),
@@ -82,9 +84,14 @@ class CodeTracer(ast.NodeTransformer):
     # return sorted coverage results
     return sorted(coverage, key=lambda row: row['line'])
 
-  def execute_node(self, node_id):
-    """Increment the execution counter of the given node."""
+  def execute_node1(self, node_id):
+    """Increment the execution counter, and start timing the given node."""
     self.nodes[node_id]['counter'] += 1
+    self.nodes[node_id]['time'] -= time.time()
+
+  def execute_node2(self, node_id):
+    """Stop timing the given node."""
+    self.nodes[node_id]['time'] += time.time()
 
   def generic_visit(self, node):
     """
@@ -106,12 +113,18 @@ class CodeTracer(ast.NodeTransformer):
     self.nodes.append({
       'node': node,
       'counter': 0,
+      'time': 0,
     })
 
     # tracing is done by calling "execute_node" of this class
-    func = ast.Attribute(
+    func1 = ast.Attribute(
       value=ast.Name(id=CodeTracer.__INJECT_NAME, ctx=ast.Load()),
-      attr='execute_node',
+      attr='execute_node1',
+      ctx=ast.Load()
+    )
+    func2 = ast.Attribute(
+      value=ast.Name(id=CodeTracer.__INJECT_NAME, ctx=ast.Load()),
+      attr='execute_node2',
       ctx=ast.Load()
     )
 
@@ -119,13 +132,16 @@ class CodeTracer(ast.NodeTransformer):
     args = [ast.Num(n=node_id)]
 
     # the tracer will be executed whenever the statement is executed
-    tracer = ast.Expr(value=ast.Call(func=func, args=args, keywords=[]))
+    tracer1 = ast.Expr(value=ast.Call(func=func1, args=args, keywords=[]))
+    tracer2 = ast.Expr(value=ast.Call(func=func2, args=args, keywords=[]))
 
     # spoof location information for the generated node
-    ast.copy_location(tracer, node)
+    ast.copy_location(tracer1, node)
+    ast.copy_location(tracer2, node)
 
-    # inject the tracer into the AST beside the current node
-    return [tracer, node]
+    # inject tracers in a try-finally construct around this node
+    wrapper = ast.Try(body=[node], handlers=[], orelse=[], finalbody=[tracer2])
+    return [tracer1, wrapper]
 
 
 class TestResult(unittest.TextTestResult):
@@ -371,15 +387,31 @@ def analyze_results(results, styler=None):
   # coverage results
   styler.emit('Coverage:')
 
-  def print_line(line, txt, hits, required):
+  def print_line(line, txt, hits, time, required):
     export['coverage']['lines'].append({
       'line': line,
       'hits': hits,
+      'time': time,
       'required': required,
     })
 
+    def format_duration(d):
+      if d < 1e-3:
+        # less than a millisecond, hide to reduce noise
+        return ''
+      elif d < 10:
+        # millisecond precision for times up to 10 seconds
+        return '%.0f ms' % (d * 1e3)
+      else:
+        return '%.0f sec' % d
+
     if required:
-      cov = '%dx' % hits
+      args = (
+        '%dx' % hits,
+        format_duration(time / max(hits, 1)),
+        format_duration(time),
+      )
+      cov = '%-10s %-10s %-10s' % args
     else:
       cov = ''
 
@@ -393,28 +425,31 @@ def analyze_results(results, styler=None):
 
     styler.emit(' %4d %s %s' % (line, txt, cov), is_source=True)
 
+    if required and time < 0:
+      raise Exception('time travel detected')
+
   with open(results['target_file']) as f:
     src = [(i, line) for (i, line) in enumerate(f.readlines())]
 
   hit_bins = {0: 0}
   for row in results['coverage']:
     while len(src) > 0 and src[0][0] < row['line'] - 1:
-      line, hits = src[0][0] + 1, 0
+      line, hits, time = src[0][0] + 1, 0, 0
       txt, src = src[0][1][:-1], src[1:]
-      print_line(line, txt, hits, False)
-    line, hits = row['line'], row['executions']
+      print_line(line, txt, hits, time, False)
+    line, hits, time = row['line'], row['executions'], row['time']
     txt, src = src[0][1][:-1], src[1:]
     required = not row['is_string']
-    print_line(line, txt, hits, required)
+    print_line(line, txt, hits, time, required)
     if required:
       if hits not in hit_bins:
         hit_bins[hits] = 1
       else:
         hit_bins[hits] += 1
   while len(src) > 0:
-    line, hits = src[0][0] + 1, 0
+    line, hits, time = src[0][0] + 1, 0, 0
     txt, src = src[0][1][:-1], src[1:]
-    print_line(line, txt, hits, False)
+    print_line(line, txt, hits, time, False)
 
   for hits in sorted(hit_bins.keys()):
     num = hit_bins[hits]
