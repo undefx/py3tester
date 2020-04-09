@@ -240,17 +240,25 @@ def run_tests(filename, output=sys.stdout):
   module = importlib.import_module(module_name)
   target_module = getattr(module, '__test_target__', None)
   if target_module is None:
-    raise Exception('%s missing attribute __test_target__' % module_name)
-  target_file = target_module.replace('.', os.path.sep) + '.py'
+    message = (
+      'Warning: '
+      '%s missing attribute __test_target__. '
+      'Coverage will not be tracked.'
+    )
+    print(message % module_name)
+    target_file = None
+  else:
+    target_file = target_module.replace('.', os.path.sep) + '.py'
 
-  # trace execution while loading the target file
-  tracer = CodeTracer.from_source_file(target_file)
-  global_vars = tracer.run()
+  if target_file:
+    # trace execution while loading the target file
+    tracer = CodeTracer.from_source_file(target_file)
+    global_vars = tracer.run()
 
-  # make the target's globals available to the test module
-  for key in global_vars:
-    if key[:2] != '__':
-      setattr(module, key, global_vars[key])
+    # make the target's globals available to the test module
+    for key in global_vars:
+      if key[:2] != '__':
+        setattr(module, key, global_vars[key])
 
   # load and run unit tests
   tests = unittest.defaultTestLoader.loadTestsFromModule(module)
@@ -260,7 +268,11 @@ def run_tests(filename, output=sys.stdout):
     resultclass=TestResult
   )
   unit_info = runner.run(tests)
-  coverage_results = tracer.get_coverage()
+
+  if target_file:
+    coverage_results = tracer.get_coverage()
+  else:
+    coverage_results = None
 
   # return unit and coverage results
   return {
@@ -351,6 +363,10 @@ def analyze_results(results, styler=None):
   styler.emit('  fail: %s' % fmt(test_bins[-1], -1))
   styler.emit('  skip: %s' % fmt(test_bins[0], 0))
   styler.emit('  pass: %s' % fmt(test_bins[1], 1))
+
+  if not results['target_file']:
+    # coverage was not computed, return test outcomes only
+    return export
 
   # coverage results
   styler.emit('Coverage:')
@@ -467,6 +483,7 @@ def run_test_sets(location, pattern, terminal, json, color, full):
   else:
     # use default output
     all_pass = True
+    num_tests = 0
     total_lines = hit_lines = 0
     for filename in test_files:
       test_results = analyze_results(run_tests(filename), styler)
@@ -474,14 +491,20 @@ def run_test_sets(location, pattern, terminal, json, color, full):
         unit_stats = test_results['unit']['summary']
         coverage_stats = test_results['coverage']['summary']
         all_pass = all_pass and unit_stats['pass'] == unit_stats['total']
-        total_lines += coverage_stats['total_lines']
-        hit_lines += coverage_stats['hit_lines']
+        num_tests += unit_stats['total']
+        if coverage_stats:
+          total_lines += coverage_stats['total_lines']
+          hit_lines += coverage_stats['hit_lines']
     if total_lines == 0:
       coverage = 0
     else:
       coverage = hit_lines / total_lines
     percent = math.floor(coverage * 100)
-    coverage_str = '%d%% (%d/%d) coverage.' % (percent, hit_lines, total_lines)
+    if total_lines:
+      args = (percent, hit_lines, total_lines)
+      coverage_str = ' %d%% (%d/%d) coverage.' % args
+    else:
+      coverage_str = ' [coverage unavailable]'
     if color:
       if all_pass:
         icon = '✔ '
@@ -490,10 +513,10 @@ def run_test_sets(location, pattern, terminal, json, color, full):
     else:
       icon = ''
     if all_pass:
-      result = '%sAll tests passed! %s' % (icon, coverage_str)
+      result = '%sAll %d tests passed!%s' % (icon, num_tests, coverage_str)
       txt = styler.colorize(result, Styler.green)
     else:
-      result = '%sSome tests did not pass. %s' % (icon, coverage_str)
+      result = '%sSome tests did not pass.%s' % (icon, coverage_str)
       txt = styler.colorize(result, Styler.red)
     styler.emit(txt)
 
