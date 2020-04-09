@@ -245,7 +245,7 @@ def run_tests(filename, output=sys.stdout):
       '%s missing attribute __test_target__. '
       'Coverage will not be tracked.'
     )
-    print(message % module_name)
+    print(message % module_name, file=output)
     target_file = None
   else:
     target_file = target_module.replace('.', os.path.sep) + '.py'
@@ -443,7 +443,7 @@ def analyze_results(results, styler=None):
   return export
 
 
-def run_test_sets(location, pattern, terminal, json, color, full):
+def run_test_sets(location, pattern, terminal, show_json, color, full):
   """
   Run all test sets and print results to standard output.
 
@@ -453,7 +453,7 @@ def run_test_sets(location, pattern, terminal, json, color, full):
     regular expression for matching unit test filenames
   terminal (bool):
     whether the search should end with the given location (non-recursive)
-  json (bool):
+  show_json (bool):
     whether to show JSON or human-readable output
   color (bool):
     whether human-readable output should be colorized
@@ -463,7 +463,7 @@ def run_test_sets(location, pattern, terminal, json, color, full):
 
   # run unit and coverage tests
   styler = Styler(
-    json_only=json,
+    json_only=show_json,
     use_colors=color,
     show_source=full
   )
@@ -472,7 +472,7 @@ def run_test_sets(location, pattern, terminal, json, color, full):
   if not test_files:
     raise Exception('no tests found')
 
-  if json:
+  if show_json:
     # suppress other output
     all_results = []
     with open(os.devnull, 'w') as output:
