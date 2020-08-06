@@ -4,9 +4,10 @@ Simultaneous unit, coverage, and timing testing for python 3 modules.
 
 Unit testing is provided by the python's built-in
 [unittest](https://docs.python.org/3/library/unittest.html) package. Line-based
-coverage and timing are measured by first injecting tracing calls into the AST
-of the target module and then recording which statements were executed, and for
-how long, by unit tests.
+coverage and timing are measured by first injecting tracing calls into the
+[AST](https://en.wikipedia.org/wiki/Abstract_syntax_tree) of the target module
+and then recording which statements were executed, and for how long, by unit
+tests.
 
 # api
 
