@@ -507,17 +507,22 @@ def run_test_sets(location, pattern, terminal, show_json, color, full):
   if not test_files:
     raise Exception('no tests found')
 
+  all_pass = True
+
   if show_json:
     # suppress other output
     all_results = []
     with open(os.devnull, 'w') as output:
       for filename in test_files:
-        test_results = run_tests(filename, output)
-        all_results.append(analyze_results(test_results, styler))
+        test_outcomes = run_tests(filename, output)
+        test_results = analyze_results(test_outcomes, styler)
+        all_results.append(test_results)
+        if len(test_results['unit']) > 0:
+          unit_stats = test_results['unit']['summary']
+          all_pass = all_pass and unit_stats['pass'] == unit_stats['total']
     print(json.dumps(all_results))
   else:
     # use default output
-    all_pass = True
     num_tests = 0
     total_lines = hit_lines = 0
     for filename in test_files:
@@ -554,6 +559,8 @@ def run_test_sets(location, pattern, terminal, show_json, color, full):
       result = '%sSome tests did not pass.%s' % (icon, coverage_str)
       txt = styler.colorize(result, Styler.red)
     styler.emit(txt)
+
+  return all_pass
 
 
 def get_argument_parser():
@@ -600,6 +607,12 @@ def get_argument_parser():
     action='store_true',
     help='show coverage for each line'
   )
+  parser.add_argument(
+    '--use-exit-code',
+    default=False,
+    action='store_true',
+    help='use exit code to indicate non-passing tests'
+  )
   return parser
 
 
@@ -607,14 +620,16 @@ def main():
   """Run this script from the command line."""
 
   args = get_argument_parser().parse_args()
-  run_test_sets(
+  all_pass = run_test_sets(
     args.location,
     args.pattern,
     args.terminal,
     args.json,
     args.color,
-    args.full
-  )
+    args.full)
+
+  if args.use_exit_code and not all_pass:
+    sys.exit(1)
 
 
 if __name__ == '__main__':
