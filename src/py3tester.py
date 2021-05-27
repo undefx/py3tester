@@ -507,7 +507,17 @@ def run_test_sets(location, pattern, terminal, show_json, color, full):
   if not test_files:
     raise Exception('no tests found')
 
-  all_pass = True
+  tests_by_outcome = {
+    'pass': [],
+    'skip': [],
+    'fail': [],
+    'error': [],
+  }
+
+  def all_pass_or_skip():
+    no_fail = not tests_by_outcome['fail']
+    no_error = not tests_by_outcome['error']
+    return no_fail and no_error
 
   if show_json:
     # suppress other output
@@ -517,9 +527,8 @@ def run_test_sets(location, pattern, terminal, show_json, color, full):
         test_outcomes = run_tests(filename, output)
         test_results = analyze_results(test_outcomes, styler)
         all_results.append(test_results)
-        if len(test_results['unit']) > 0:
-          unit_stats = test_results['unit']['summary']
-          all_pass = all_pass and unit_stats['pass'] == unit_stats['total']
+        for test_name, test_outcome in test_results['unit']['tests'].items():
+          tests_by_outcome[test_outcome].append(test_name)
     print(json.dumps(all_results))
   else:
     # use default output
@@ -530,7 +539,8 @@ def run_test_sets(location, pattern, terminal, show_json, color, full):
       if len(test_results['unit']) > 0:
         unit_stats = test_results['unit']['summary']
         coverage_stats = test_results['coverage']['summary']
-        all_pass = all_pass and unit_stats['pass'] == unit_stats['total']
+        for test_name, test_outcome in test_results['unit']['tests'].items():
+          tests_by_outcome[test_outcome].append(test_name)
         num_tests += unit_stats['total']
         if coverage_stats:
           total_lines += coverage_stats['total_lines']
@@ -545,22 +555,42 @@ def run_test_sets(location, pattern, terminal, show_json, color, full):
       coverage_str = ' %d%% (%d/%d) coverage.' % args
     else:
       coverage_str = ' [coverage unavailable]'
+
+    all_ok = all_pass_or_skip()
     if color:
-      if all_pass:
+      if all_ok:
         icon = '✔ '
       else:
         icon = '✘ '
     else:
       icon = ''
-    if all_pass:
-      result = '%sAll %d tests passed!%s' % (icon, num_tests, coverage_str)
+    if all_ok:
+      num_pass = len(tests_by_outcome['pass'])
+      if tests_by_outcome['skip']:
+        skip_str = ' (%s skipped)' % len(tests_by_outcome['skip'])
+      else:
+        skip_str = ''
+      args = (icon, num_pass, skip_str, coverage_str)
+      result = '%sAll %d tests passed!%s%s' % args
       txt = styler.colorize(result, Styler.green)
     else:
       result = '%sSome tests did not pass.%s' % (icon, coverage_str)
       txt = styler.colorize(result, Styler.red)
+
+    def print_status(label, outcome):
+      if not tests_by_outcome[outcome]:
+        return
+      print('%s:' % label)
+      for name in tests_by_outcome[outcome]:
+        print(' - %s' % name)
+
+    print_status('skipped', 'skip')
+    print_status('failed', 'fail')
+    print_status('broken', 'error')
+
     styler.emit(txt)
 
-  return all_pass
+  return all_pass_or_skip()
 
 
 def get_argument_parser():
