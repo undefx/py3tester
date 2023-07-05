@@ -593,74 +593,126 @@ def run_test_sets(location, pattern, terminal, show_json, color, full):
   return all_pass_or_skip()
 
 
-def get_argument_parser():
-  """Set up command line arguments and usage."""
+def get_cli_argument_parser():
+  """Set up command line arguments and usage.
+
+  These are the arguments used when py3tester is run as a standalone tool.
+  """
 
   parser = argparse.ArgumentParser()
   parser.add_argument(
-    'location',
-    type=str,
-    help='file or directory containing unit tests'
-  )
+      'location',
+      type=str,
+      help='file or directory containing unit tests')
   parser.add_argument(
-    '--pattern',
-    '-p',
-    default='^(test_.*|.*_test)\\.py$',
-    type=str,
-    help='filename regex for test discovery'
-  )
+      '--pattern',
+      '-p',
+      default='^(test_.*|.*_test)\\.py$',
+      type=str,
+      help='filename regex for test discovery')
   parser.add_argument(
-    '--terminal',
-    '-t',
-    default=False,
-    action='store_true',
-    help='do not search for tests recursively'
-  )
+      '--terminal',
+      '-t',
+      default=False,
+      action='store_true',
+      help='do not search for tests recursively')
   parser.add_argument(
-    '--json',
-    '--j',
-    default=False,
-    action='store_true',
-    help='print results in JSON format'
-  )
+      '--json',
+      '--j',
+      default=False,
+      action='store_true',
+      help='print results in JSON format')
   parser.add_argument(
-    '--color',
-    '-c',
-    default=False,
-    action='store_true',
-    help='colorize results'
-  )
+      '--color',
+      '-c',
+      default=False,
+      action='store_true',
+      help='colorize results')
   parser.add_argument(
-    '--full',
-    '--f',
-    default=False,
-    action='store_true',
-    help='show coverage for each line'
-  )
+      '--full',
+      '--f',
+      default=False,
+      action='store_true',
+      help='show coverage for each line')
   parser.add_argument(
-    '--use-exit-code',
-    default=False,
-    action='store_true',
-    help='use exit code to indicate non-passing tests'
-  )
+      '--use-exit-code',
+      default=False,
+      action='store_true',
+      help='use exit code to indicate non-passing tests')
   return parser
 
 
-def main():
+def get_lib_argument_parser():
+  """Set up command line arguments and usage.
+
+  These are the arguments used when py3tester is called from within a unit
+  test.
+  """
+
+  parser = argparse.ArgumentParser()
+  parser.add_argument(
+      '--color',
+      '-c',
+      default=False,
+      action='store_true',
+      help='colorize results')
+  parser.add_argument(
+      '--full',
+      '--f',
+      default=False,
+      action='store_true',
+      help='show coverage for each line')
+  return parser
+
+
+def main_cli():
   """Run this script from the command line."""
 
-  args = get_argument_parser().parse_args()
+  args = get_cli_argument_parser().parse_args()
   all_pass = run_test_sets(
-    args.location,
-    args.pattern,
-    args.terminal,
-    args.json,
-    args.color,
-    args.full)
+      args.location,
+      args.pattern,
+      args.terminal,
+      args.json,
+      args.color,
+      args.full)
 
   if args.use_exit_code and not all_pass:
     sys.exit(1)
 
 
+def main(module='__main__', exit=True):
+  """Run this script from within a unit test.
+
+  This is a drop-in replacement for `unittest.main()`, although only some of
+  the parameters are supported.
+
+  See https://docs.python.org/3/library/unittest.html#unittest.main for a
+  description of the parameters.
+  """
+
+  caller = inspect.stack()[1]
+  path = caller.filename
+  search = module + os.sep
+  try:
+    idx = path.rindex(search)
+  except ValueError as e:
+    msg = 'module "%s" not found in path "%s"' % (module, path)
+    raise ModuleNotFoundError(msg) from e
+  location = path[idx + len(search):]
+
+  args = get_lib_argument_parser().parse_args()
+  all_pass = run_test_sets(
+      location=location,
+      pattern='',
+      terminal=True,
+      show_json=False,
+      color=args.color,
+      full=args.full)
+
+  if exit:
+    sys.exit(0 if all_pass else 1)
+
+
 if __name__ == '__main__':
-  main()
+  main_cli()

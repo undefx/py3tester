@@ -9,6 +9,54 @@ coverage and timing are measured by first injecting tracing calls into the
 and then recording which statements were executed, and for how long, by unit
 tests.
 
+`py3tester` can be invoked in a number of ways:
+
+- as a drop-in replacement for `unittest` (e.g. `py3tester.main()`, see
+    [the migration](#migration))
+
+- programmatically from another script (e.g. `run_tests(...)`, see
+    [the api](#api))
+
+- as a command line tool (e.g. `python3 -m src.py3tester ...`, see
+    [the example](#example))
+
+# migration
+
+Migrating tests that already use python's built-in `unittest` module is simple:
+
+1. import `py3tester`
+1. add the `__test_target__` attribute (optional, for coverage and profiling)
+1. change `unittest.main()` to `py3tester.main()`
+
+For example:
+
+```python
+import unittest
+from foo.bar.baz import Thing
+
+class ThingTests(unittest.TestCase):
+  ...
+
+if __name__ == '__main__':
+  unittest.main()
+```
+
+becomes:
+
+```python
+import unittest
+import py3tester  # step 1
+from foo.bar.baz import Thing
+
+__test_target__ = 'foo.bar.baz'  # step 2 (optional)
+
+class ThingTests(unittest.TestCase):
+  ...
+
+if __name__ == '__main__':
+  py3tester.main()  # step 3
+```
+
 # api
 
 Testing can be done programmatically by calling `run_tests`. For example:
