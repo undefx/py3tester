@@ -58,14 +58,16 @@ class CodeTracer(ast.NodeTransformer):
       - executions: the number of times the statement was executed
       - line: the line number of the statement (1-indexed)
       - column: the column number of the statement (0-indexed)
-      - is_string: a boolean indicating whether the statement was a string
+      - is_constant: a boolean indicating whether the statement was a constant
 
     The list is sorted by line number.
     """
 
-    # function to determine whether a given node is a string (e.g. a docstring)
-    def is_string(node):
-      return isinstance(node, ast.Expr) and isinstance(node.value, ast.Str)
+    # returns whether the node is a constant (e.g. a docstring or `...`)
+    def is_constant(node):
+      if not isinstance(node, ast.Expr):
+        return False
+      return isinstance(node.value, ast.Constant)
 
     # iterate over all nodes
     coverage = []
@@ -78,7 +80,7 @@ class CodeTracer(ast.NodeTransformer):
         'time': node_info['time'],
         'line': node.lineno,
         'column': node.col_offset,
-        'is_string': is_string(node),
+        'is_constant': is_constant(node),
       })
 
     # return sorted coverage results
@@ -439,7 +441,7 @@ def analyze_results(results, styler=None):
       print_line(line, txt, hits, time, False)
     line, hits, time = row['line'], row['executions'], row['time']
     txt, src = src[0][1][:-1], src[1:]
-    required = not row['is_string']
+    required = not row['is_constant']
     print_line(line, txt, hits, time, required)
     if required:
       if hits not in hit_bins:
