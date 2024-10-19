@@ -683,7 +683,7 @@ def main_cli():
     sys.exit(1)
 
 
-def main(module='__main__', exit=True):
+def main(exit=True):
   """Run this script from within a unit test.
 
   This is a drop-in replacement for `unittest.main()`, although only some of
@@ -694,14 +694,13 @@ def main(module='__main__', exit=True):
   """
 
   caller = inspect.stack()[1]
-  path = caller.filename
-  search = module + os.sep
-  try:
-    idx = path.rindex(search)
-  except ValueError as e:
-    msg = 'module "%s" not found in path "%s"' % (module, path)
-    raise ModuleNotFoundError(msg) from e
-  location = path[idx + len(search):]
+  test_file = inspect.getfile(caller.frame)
+  path_prefix = os.getcwd() + os.sep
+  if not test_file.startswith(path_prefix):
+    args = path_prefix, test_file
+    msg = 'directory "%s" is not a prefix of test file "%s"'
+    raise FileNotFoundError(msg % args)
+  location = test_file[len(path_prefix):]
 
   args = get_lib_argument_parser().parse_args()
   all_pass = run_test_sets(
